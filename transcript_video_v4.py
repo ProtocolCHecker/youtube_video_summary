@@ -2,6 +2,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 import requests
 import pandas as pd
+import time
 
 # Function to fetch and parse the summarized content
 def get_summarized_content(youtube_url):
@@ -25,20 +26,34 @@ def get_summarized_content(youtube_url):
         'upgrade-insecure-requests': '1',
         'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
     }
-    
-    # Send GET request to summarize.tech with the YouTube video URL
-    response = requests.get(summarize_url, headers=headers)
+
+    # Attempt to get a response, checking every 10 seconds for up to 10 minutes
+    response = None
+    for attempt in range(60):  # 60 attempts (10 minutes at 10-second intervals)
+        try:
+            response = requests.get(summarize_url, headers=headers)
+            if response.status_code == 200:
+                break  # Exit the loop if a successful response is received
+        except requests.exceptions.RequestException as e:
+            st.write(f"Attempt {attempt+1}: Waiting for the website to respond...")
+        time.sleep(10)  # Wait for 10 seconds before retrying
+
+    # Check if a response was received after the loop
+    if response is None or response.status_code != 200:
+        st.error("Failed to retrieve a response from the website. Please try again later.")
+        return "", pd.DataFrame()  # Return empty values if no response
+
+    # Parse the HTML response
     soup = BeautifulSoup(response.text, 'html.parser')
     
-    # Concatenate overall summaries starting with "In the 'Bankless'" or "In the 'Announcing'"
-    overall_summaries = []
-    for p in soup.find_all('p'):
-        text = p.get_text(strip=True)
-        if text.startswith("In the \"Bankless") or text.startswith("In the \"Announcing"):
-            overall_summaries.append(text)
+    # Extract the overall summary from the first <p> tag within the relevant <section>
+    overall_summary = ""
+    summary_section = soup.find('section')
+    if summary_section:
+        overall_summary_paragraph = summary_section.find('p')
+        if overall_summary_paragraph:
+            overall_summary = overall_summary_paragraph.get_text(strip=True)
 
-    concatenated_overall = " ".join(overall_summaries)
-    
     # Extract detailed summaries with timestamps for the table
     detailed_summaries = []
     for li in soup.find_all('li'):
@@ -49,7 +64,7 @@ def get_summarized_content(youtube_url):
     # Convert detailed summaries to DataFrame
     df = pd.DataFrame(detailed_summaries)
 
-    return concatenated_overall, df
+    return overall_summary, df
 
 # Streamlit app setup
 st.title("YouTube Video Summarizer")
